@@ -1,0 +1,37 @@
+services:
+  frontend:
+    build:
+      context: ./frontend
+    environment:
+      BACKEND_URL: http://backend:8000
+      DEBUG: ${DEBUG:-0}
+    ports:
+      - '3000:3000'
+      - '9229:9229'
+    volumes:
+      - ./frontend:/app
+      - /app/node_modules
+    depends_on:
+      - backend
+    command: >
+      sh -c "if [ \"$$DEBUG\" = \"1\" ];
+      then node --inspect=0.0.0.0:9229 node_modules/next/dist/bin/next dev -H 0.0.0.0 -p 3000;
+      else npm run dev -- --hostname 0.0.0.0 --port 3000;
+      fi"
+
+  backend:
+    build:
+      context: ./backend
+    environment:
+      DEBUG: ${DEBUG:-0}
+      PYTHONUNBUFFERED: 1
+    ports:
+      - '8000:8000'
+      - '5678:5678'
+    volumes:
+      - ./backend:/app
+    command: >
+      sh -c "if [ \"$$DEBUG\" = \"1\" ];
+      then python -m debugpy --listen 0.0.0.0:5678 -m uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload;
+      else uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload;
+      fi"
