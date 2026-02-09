@@ -20,6 +20,7 @@ let state = null;
 let analysisData = null;
 let historyData = { moves: [] };
 let selectedCandidateIndex = -1;
+let analysisSocket = null;
 
 const margin = 24;
 
@@ -63,6 +64,21 @@ function selectedCandidate() {
   if (!analysisData?.candidates?.length) return null;
   if (selectedCandidateIndex < 0 || selectedCandidateIndex >= analysisData.candidates.length) return null;
   return analysisData.candidates[selectedCandidateIndex];
+}
+
+function wsURL(pathWithQuery) {
+  const proto = window.location.protocol === "https:" ? "wss" : "ws";
+  return `${proto}://${window.location.host}${pathWithQuery}`;
+}
+
+function closeAnalysisSocket() {
+  if (!analysisSocket) return;
+  try {
+    analysisSocket.close();
+  } catch (e) {
+    // ignore close races
+  }
+  analysisSocket = null;
 }
 
 function drawBoard() {
@@ -250,6 +266,79 @@ async function api(path, method = "GET", body = null) {
   return res.json();
 }
 
+async function runLiveAnalysis(color) {
+  if (!state) return null;
+  closeAnalysisSocket();
+  return new Promise((resolve, reject) => {
+    const params = new URLSearchParams({
+      color,
+      visits: String(Number(visitsInput.value)),
+      max_moves: "6",
+    });
+    const ws = new WebSocket(wsURL(`/ws/analyze?${params.toString()}`));
+    analysisSocket = ws;
+    let finished = false;
+    let last = null;
+
+    ws.onopen = () => {
+      updateThinkProgress(5, "KataGo is analyzing...");
+    };
+
+    ws.onmessage = (event) => {
+      let msg = null;
+      try {
+        msg = JSON.parse(event.data);
+      } catch (e) {
+        return;
+      }
+      if (msg.type === "error") {
+        finished = true;
+        closeAnalysisSocket();
+        reject(new Error(msg.detail || "analysis stream failed"));
+        return;
+      }
+      if (msg.type === "update" || msg.type === "done") {
+        const next = msg.analysis || null;
+        if (!next) return;
+        last = next;
+        const prevSelectedMove = selectedCandidate()?.move || null;
+        analysisData = next;
+        if (prevSelectedMove) {
+          const idx = (analysisData.candidates || []).findIndex((c) => c.move === prevSelectedMove);
+          selectedCandidateIndex = idx >= 0 ? idx : 0;
+        } else {
+          selectedCandidateIndex = analysisData.candidates?.length ? 0 : -1;
+        }
+        renderAnalysis();
+        drawBoard();
+        const cur = Number(next.visits_requested || 0);
+        const target = Number(next.visits_target || cur || 1);
+        const pct = Math.max(5, Math.min(100, Math.round((cur / target) * 100)));
+        updateThinkProgress(pct, `KataGo analysis: ${cur}/${target} visits`);
+      }
+      if (msg.type === "done") {
+        finished = true;
+        closeAnalysisSocket();
+        resolve(last);
+      }
+    };
+
+    ws.onerror = () => {
+      if (finished) return;
+      finished = true;
+      closeAnalysisSocket();
+      reject(new Error("analysis websocket error"));
+    };
+
+    ws.onclose = () => {
+      if (finished) return;
+      finished = true;
+      closeAnalysisSocket();
+      reject(new Error("analysis websocket closed"));
+    };
+  });
+}
+
 async function refreshState() {
   state = await api("/game/state");
   historyData = await api("/game/history");
@@ -262,15 +351,8 @@ async function maybeAIMove() {
   if (state.to_move !== state.ai_color) return;
   updateThinkProgress(10, "KataGo is analyzing the position...");
   try {
-    analysisData = await api("/game/analyze", "POST", {
-      color: state.ai_color,
-      visits: Number(visitsInput.value),
-      max_moves: 6,
-    });
-    selectedCandidateIndex = analysisData.candidates?.length ? 0 : -1;
-    drawBoard();
-    renderAnalysis();
-    updateThinkProgress(72, `Analysis ready in ${analysisData.elapsed_ms} ms`);
+    await runLiveAnalysis(state.ai_color);
+    updateThinkProgress(78, "Analysis complete");
   } catch (err) {
     updateThinkProgress(0, `Analysis error: ${err.message}`);
   }
@@ -289,6 +371,7 @@ async function maybeAIMove() {
 async function startNewGame() {
   const size = Number(sizeSelect.value);
   const humanColor = colorSelect.value;
+  closeAnalysisSocket();
   analysisData = null;
   selectedCandidateIndex = -1;
   renderAnalysis();
@@ -315,6 +398,7 @@ canvas.addEventListener("click", async (evt) => {
 
   try {
     state = await api("/game/play", "POST", { x, y });
+    closeAnalysisSocket();
     historyData = await api("/game/history");
     renderHistory();
     analysisData = null;
@@ -340,6 +424,7 @@ passBtn.addEventListener("click", async () => {
   if (!state || state.to_move !== state.human_color) return;
   try {
     state = await api("/game/pass", "POST");
+    closeAnalysisSocket();
     historyData = await api("/game/history");
     renderHistory();
     analysisData = null;
@@ -354,6 +439,7 @@ passBtn.addEventListener("click", async () => {
 });
 
 async function undoSteps(steps) {
+  closeAnalysisSocket();
   state = await api("/game/undo", "POST", { steps });
   historyData = await api("/game/history");
   analysisData = null;
@@ -385,16 +471,8 @@ undo2Btn.addEventListener("click", async () => {
 analyzeBtn.addEventListener("click", async () => {
   if (!state) return;
   try {
-    updateThinkProgress(12, "Requesting analysis...");
-    analysisData = await api("/game/analyze", "POST", {
-      color: state.to_move,
-      visits: Number(visitsInput.value),
-      max_moves: 6,
-    });
-    selectedCandidateIndex = analysisData.candidates?.length ? 0 : -1;
-    drawBoard();
-    renderAnalysis();
-    updateThinkProgress(100, `Done in ${analysisData.elapsed_ms} ms`);
+    await runLiveAnalysis(state.to_move);
+    updateThinkProgress(100, "Live analysis complete");
     setTimeout(() => updateThinkProgress(0, ""), 800);
   } catch (err) {
     updateThinkProgress(0, `Analysis error: ${err.message}`);

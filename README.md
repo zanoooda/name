@@ -33,6 +33,7 @@ After startup:
 
 - If `/api/game/analyze` is slow on CPU, lower `Analysis depth (visits)` in the UI.
 - Nginx proxy timeout for `/api/*` is increased to 300s to avoid premature `504` on long analysis.
+- Live analysis in UI is streamed via WebSocket (`/ws/analyze`) with incremental updates, so the board updates while KataGo is thinking.
 
 ## Notes
 

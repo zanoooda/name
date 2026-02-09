@@ -7,7 +7,7 @@ import time
 from dataclasses import dataclass, field
 from typing import Optional
 
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect
 from pydantic import BaseModel, Field
 
 
@@ -602,6 +602,82 @@ async def analyze(req: AnalyzeRequest) -> dict:
             )
         except RuntimeError as err:
             raise HTTPException(status_code=500, detail=f"analysis failed: {err}") from err
+
+
+def build_analysis_steps(target_visits: int) -> list[int]:
+    if target_visits <= 20:
+        return [target_visits]
+    step = max(20, target_visits // 6)
+    values = []
+    cur = min(20, target_visits)
+    while cur < target_visits:
+        values.append(cur)
+        cur += step
+    values.append(target_visits)
+    # Remove duplicates while preserving order.
+    out: list[int] = []
+    seen: set[int] = set()
+    for v in values:
+        if v in seen:
+            continue
+        out.append(v)
+        seen.add(v)
+    return out
+
+
+@app.websocket("/ws/analyze")
+async def analyze_ws(websocket: WebSocket) -> None:
+    await websocket.accept()
+    try:
+        qp = websocket.query_params
+        visits = int(qp.get("visits", "80"))
+        max_moves = int(qp.get("max_moves", "6"))
+        color_q = qp.get("color")
+        visits = max(20, min(3000, visits))
+        max_moves = max(1, min(12, max_moves))
+        if color_q is not None:
+            color_q = color_q.upper()
+            if color_q not in {"B", "W"}:
+                await websocket.send_json({"type": "error", "detail": "invalid color"})
+                await websocket.close()
+                return
+
+        async with lock:
+            await ensure_engine_ready(state.size, komi_value)
+            size = state.size
+            komi = komi_value
+            color = color_q or state.to_move
+            moves = list(state.moves)
+
+        steps = build_analysis_steps(visits)
+        last: Optional[dict] = None
+        for v in steps:
+            snapshot = await asyncio.to_thread(
+                run_analysis_snapshot,
+                size,
+                komi,
+                color,
+                v,
+                max_moves,
+                moves,
+            )
+            snapshot["visits_target"] = visits
+            await websocket.send_json({"type": "update", "analysis": snapshot})
+            last = snapshot
+
+        await websocket.send_json({"type": "done", "analysis": last})
+        await websocket.close()
+    except WebSocketDisconnect:
+        return
+    except Exception as err:
+        try:
+            await websocket.send_json({"type": "error", "detail": str(err)})
+        except Exception:
+            pass
+        try:
+            await websocket.close()
+        except Exception:
+            pass
 
 
 @app.post("/game/undo")
