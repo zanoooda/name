@@ -25,6 +25,7 @@ After startup:
   - passing,
   - viewing KataGo analysis (top candidates on board, visits/winrate/lead),
   - seeing candidate weight directly on the board as visit share,
+  - selecting a candidate to preview its PV line on the board,
   - viewing move history,
   - undoing the last move or last pair of moves.
 

@@ -19,6 +19,7 @@ const historyList = document.getElementById("history-list");
 let state = null;
 let analysisData = null;
 let historyData = { moves: [] };
+let selectedCandidateIndex = -1;
 
 const margin = 24;
 
@@ -32,6 +33,36 @@ function gap(size) {
 
 function coordToPixel(x, y, size) {
   return [margin + x * gap(size), margin + y * gap(size)];
+}
+
+function gtpToCoord(vertex, size) {
+  if (!vertex) return null;
+  const token = String(vertex).trim().toUpperCase();
+  if (token === "PASS" || token === "RESIGN") return null;
+  if (token.length < 2) return null;
+  const col = token.charCodeAt(0);
+  let x = col - 65;
+  if (token[0] > "I") x -= 1;
+  const row = Number(token.slice(1));
+  if (!Number.isFinite(row)) return null;
+  const y = size - row;
+  if (x < 0 || y < 0 || x >= size || y >= size) return null;
+  return { x, y };
+}
+
+function analysisTotalVisits() {
+  if (!analysisData?.candidates?.length) return 1;
+  return analysisData.candidates.reduce((acc, item) => acc + (item.visits || 0), 0) || 1;
+}
+
+function candidateWeight(item) {
+  return (item?.visits || 0) / analysisTotalVisits();
+}
+
+function selectedCandidate() {
+  if (!analysisData?.candidates?.length) return null;
+  if (selectedCandidateIndex < 0 || selectedCandidateIndex >= analysisData.candidates.length) return null;
+  return analysisData.candidates[selectedCandidateIndex];
 }
 
 function drawBoard() {
@@ -73,24 +104,28 @@ function drawBoard() {
   }
 
   drawAnalysisOverlay();
+  drawPVOverlay();
 }
 
 function drawAnalysisOverlay() {
   if (!analysisData || !analysisData.candidates) return;
   const size = state.size;
-  const totalVisits = analysisData.candidates.reduce((acc, item) => acc + (item.visits || 0), 0) || 1;
-  const base = Math.max(7, gap(size) * 0.34);
+  const totalVisits = analysisTotalVisits();
+  const base = Math.max(7, gap(size) * 0.28);
   analysisData.candidates.forEach((item, idx) => {
     if (item.x === null || item.y === null) return;
     const weight = Math.max(0.02, (item.visits || 0) / totalVisits);
     const [px, py] = coordToPixel(item.x, item.y, size);
-    const alpha = Math.max(0.22, 0.24 + weight * 1.2);
-    const radius = base + weight * gap(size) * 0.9;
+    const isActive = idx === selectedCandidateIndex;
+    const alpha = Math.max(0.22, 0.2 + weight * 1.3);
+    const radius = base + weight * gap(size) * (isActive ? 1.35 : 1.0);
+    const hue = Math.max(20, Math.min(125, Math.round(20 + weight * 105)));
     ctx.beginPath();
     ctx.arc(px, py, radius, 0, Math.PI * 2);
-    ctx.fillStyle = `rgba(225, 68, 30, ${alpha})`;
+    ctx.fillStyle = `hsla(${hue}, 78%, 48%, ${alpha})`;
     ctx.fill();
-    ctx.strokeStyle = "rgba(110, 22, 0, 0.45)";
+    ctx.strokeStyle = isActive ? "rgba(12, 14, 12, 0.75)" : "rgba(40, 28, 10, 0.35)";
+    ctx.lineWidth = isActive ? 2.2 : 1.2;
     ctx.stroke();
 
     ctx.fillStyle = "#fffdf5";
@@ -100,9 +135,47 @@ function drawAnalysisOverlay() {
     ctx.fillText(`${Math.round(weight * 100)}%`, px, py);
 
     ctx.fillStyle = "#6a1d08";
-    ctx.font = `bold ${Math.max(10, gap(size) * 0.24)}px "IBM Plex Sans"`;
+    ctx.font = `bold ${Math.max(10, gap(size) * 0.22)}px "IBM Plex Sans"`;
     ctx.fillText(String(idx + 1), px, py - radius - 8);
   });
+  ctx.lineWidth = 1.2;
+}
+
+function drawPVOverlay() {
+  const candidate = selectedCandidate();
+  if (!candidate || !Array.isArray(candidate.pv) || candidate.pv.length === 0 || !state) return;
+
+  const size = state.size;
+  const maxPv = Math.min(10, candidate.pv.length);
+  let color = analysisData?.to_move === "W" ? "W" : "B";
+  const stoneR = Math.max(7, gap(size) * 0.33);
+
+  for (let i = 0; i < maxPv; i += 1) {
+    const c = gtpToCoord(candidate.pv[i], size);
+    if (!c) {
+      color = color === "B" ? "W" : "B";
+      continue;
+    }
+    const [px, py] = coordToPixel(c.x, c.y, size);
+    const scale = 1 - i * 0.04;
+    const r = stoneR * Math.max(0.62, scale);
+
+    ctx.beginPath();
+    ctx.arc(px, py, r, 0, Math.PI * 2);
+    ctx.fillStyle = color === "B" ? "rgba(20,20,20,0.74)" : "rgba(255,255,255,0.8)";
+    ctx.fill();
+    ctx.strokeStyle = "rgba(30,30,30,0.55)";
+    ctx.lineWidth = 1.1;
+    ctx.stroke();
+
+    ctx.fillStyle = color === "B" ? "#f4f2ea" : "#171717";
+    ctx.font = `bold ${Math.max(9, gap(size) * 0.22)}px "IBM Plex Sans"`;
+    ctx.textAlign = "center";
+    ctx.textBaseline = "middle";
+    ctx.fillText(String(i + 1), px, py);
+    color = color === "B" ? "W" : "B";
+  }
+  ctx.lineWidth = 1.2;
 }
 
 function updateInfo() {
@@ -124,14 +197,27 @@ function renderAnalysis() {
     analysisList.innerHTML = "<li>No analysis data</li>";
     return;
   }
+  const sum = analysisTotalVisits();
   analysisData.candidates.forEach((item, idx) => {
     const wr = item.winrate === null || item.winrate === undefined ? "-" : `${(item.winrate * 100).toFixed(1)}%`;
     const visits = item.visits ?? "-";
-    const sum = analysisData.candidates.reduce((acc, x) => acc + (x.visits || 0), 0) || 1;
     const weight = item.visits ? `${((item.visits / sum) * 100).toFixed(1)}%` : "-";
     const score = item.score_lead === null || item.score_lead === undefined ? "-" : item.score_lead.toFixed(1);
+    const pvShort = Array.isArray(item.pv) && item.pv.length ? item.pv.slice(0, 6).join(" ") : "-";
     const li = document.createElement("li");
-    li.innerHTML = `<strong>#${idx + 1}</strong><span>${item.move}</span><span>weight ${weight} | visits ${visits} | WR ${wr} | lead ${score}</span>`;
+    li.className = "analysis-item";
+    if (idx === selectedCandidateIndex) li.classList.add("analysis-item-active");
+    li.innerHTML = `<strong>#${idx + 1}</strong><span>${item.move}</span><span>w ${weight} | v ${visits} | WR ${wr} | lead ${score}<br/>PV: ${pvShort}</span>`;
+    li.addEventListener("mouseenter", () => {
+      selectedCandidateIndex = idx;
+      renderAnalysis();
+      drawBoard();
+    });
+    li.addEventListener("click", () => {
+      selectedCandidateIndex = idx;
+      renderAnalysis();
+      drawBoard();
+    });
     analysisList.appendChild(li);
   });
 }
@@ -181,6 +267,7 @@ async function maybeAIMove() {
       visits: Number(visitsInput.value),
       max_moves: 6,
     });
+    selectedCandidateIndex = analysisData.candidates?.length ? 0 : -1;
     drawBoard();
     renderAnalysis();
     updateThinkProgress(72, `Analysis ready in ${analysisData.elapsed_ms} ms`);
@@ -203,6 +290,7 @@ async function startNewGame() {
   const size = Number(sizeSelect.value);
   const humanColor = colorSelect.value;
   analysisData = null;
+  selectedCandidateIndex = -1;
   renderAnalysis();
   updateThinkProgress(0, "");
   state = await api("/game/new", "POST", { size, human_color: humanColor, komi: 7.5 });
@@ -230,6 +318,7 @@ canvas.addEventListener("click", async (evt) => {
     historyData = await api("/game/history");
     renderHistory();
     analysisData = null;
+    selectedCandidateIndex = -1;
     renderAnalysis();
     drawBoard();
     updateInfo();
@@ -254,6 +343,7 @@ passBtn.addEventListener("click", async () => {
     historyData = await api("/game/history");
     renderHistory();
     analysisData = null;
+    selectedCandidateIndex = -1;
     renderAnalysis();
     drawBoard();
     updateInfo();
@@ -267,6 +357,7 @@ async function undoSteps(steps) {
   state = await api("/game/undo", "POST", { steps });
   historyData = await api("/game/history");
   analysisData = null;
+  selectedCandidateIndex = -1;
   renderAnalysis();
   renderHistory();
   drawBoard();
@@ -300,6 +391,7 @@ analyzeBtn.addEventListener("click", async () => {
       visits: Number(visitsInput.value),
       max_moves: 6,
     });
+    selectedCandidateIndex = analysisData.candidates?.length ? 0 : -1;
     drawBoard();
     renderAnalysis();
     updateThinkProgress(100, `Done in ${analysisData.elapsed_ms} ms`);

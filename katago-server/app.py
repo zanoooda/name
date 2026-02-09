@@ -423,7 +423,7 @@ def parse_analysis_lines(
                 idx += 2
                 continue
             if key == "pv":
-                item["pv"] = [p.upper() for p in parts[idx + 1 : idx + 6]]
+                item["pv"] = [p.upper() for p in parts[idx + 1 : idx + 13]]
                 break
             idx += 1
 
