@@ -1,0 +1,29 @@
+services:
+  katago-server:
+    build:
+      context: ./katago-server
+    container_name: katago-server
+    environment:
+      KATAGO_VERSION: "v1.16.4"
+      KATAGO_TARGET: "eigen-linux-x64"
+      KATAGO_MODEL_URL: ""
+      KATAGO_API_HOST: "0.0.0.0"
+      KATAGO_API_PORT: "8080"
+    ports:
+      - "8080:8080"
+    volumes:
+      - katago-data:/opt/katago
+    restart: unless-stopped
+
+  go-client:
+    build:
+      context: ./go-client
+    container_name: go-client
+    depends_on:
+      - katago-server
+    ports:
+      - "3000:80"
+    restart: unless-stopped
+
+volumes:
+  katago-data:

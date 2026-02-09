@@ -1,0 +1,63 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Local Go + KataGo</title>
+    <link rel="stylesheet" href="styles.css" />
+  </head>
+  <body>
+    <main class="layout">
+      <section class="board-wrap">
+        <canvas id="board" width="760" height="760"></canvas>
+      </section>
+      <section class="panel">
+        <h1>Local Go Game</h1>
+        <p id="status">Loading...</p>
+
+        <div class="controls">
+          <label>
+            Board size
+            <select id="board-size">
+              <option value="19" selected>19x19</option>
+              <option value="13">13x13</option>
+              <option value="9">9x9</option>
+            </select>
+          </label>
+          <label>
+            Your color
+            <select id="human-color">
+              <option value="B" selected>Black</option>
+              <option value="W">White</option>
+            </select>
+          </label>
+          <button id="new-game">New game</button>
+          <button id="pass">Pass</button>
+          <button id="undo-1">Undo 1 ply</button>
+          <button id="undo-2">Undo last pair</button>
+          <button id="analyze">Show analysis</button>
+          <label>
+            Analysis depth (visits)
+            <input id="visits" type="range" min="20" max="600" step="20" value="80" />
+            <span id="visits-value">80</span>
+          </label>
+        </div>
+
+        <div id="captures"></div>
+        <div class="think-wrap">
+          <div id="think-label"></div>
+          <div class="think-bar"><div id="think-progress"></div></div>
+        </div>
+        <div class="analysis">
+          <h2>How KataGo Thinks</h2>
+          <ul id="analysis-list"></ul>
+        </div>
+        <div class="history">
+          <h2>Move History</h2>
+          <ul id="history-list"></ul>
+        </div>
+      </section>
+    </main>
+    <script src="app.js"></script>
+  </body>
+</html>
