@@ -11,7 +11,7 @@ docker compose up --build
 ```
 
 After startup:
-- client: http://localhost:3000
+- client: http://localhost
 - API: http://localhost:8080
 
 ## How it works
